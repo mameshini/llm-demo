@@ -1,0 +1,15 @@
+# Not all of these are relevant to this particular implementation
+
+streamlit
+openai
+nltk
+tqdm
+gpt-index
+langchain
+streamlit-chat
+stop-words
+Pillow
+scikit-learn
+streamlit-extras
+requests
+llama-index
