@@ -160,3 +160,4 @@ cython_debug/
 #.idea/
 launch.json
 secrets.toml
+settings.json

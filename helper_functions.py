@@ -1,14 +1,10 @@
 # Third-Party Imports
 import streamlit as st
-import openai
 import langchain
 from index_functions import load_data
-from llama_index import VectorStoreIndex, ServiceContext, Document
-from llama_index.llms import OpenAI
-from llama_index import SimpleDirectoryReader
 
 # Main function to generate responses from OpenAI's API, not considering indexed data
-def generate_response(prompt, history, model_name, temperature):
+def generate_response(prompt, history, model_name, openai_client, temperature):
     # Fetching the last message sent by the chatbot from the conversation history
     chatbot_message = history[-1]['content']
 
@@ -25,22 +21,26 @@ def generate_response(prompt, history, model_name, temperature):
     ### Previous conversation history for context: {history}"
 
     # Making an API call to OpenAI to generate a chatbot response based on the constructed prompt
-    api_response = openai.ChatCompletion.create(
-        model=model_name,  # The specific OpenAI model to use for generating the response
-        temperature=temperature,  # The 'creativity' setting for the response
-        messages=[  # The list of message objects to provide conversation history context
-            {"role": "system", "content": full_prompt},  # System message to provide instruction
-            {"role": "user", "content": last_user_message}  # The last user message to generate a relevant reply
-        ]
+    api_response = openai_client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            # Assuming there's a need to include any system or user messages for context
+            # {"role": "system", "content": "Your system message here"},
+            {"role": "user", "content": full_prompt}
+        ],
+        temperature=temperature,
+        max_tokens=350,  # Assuming a max_tokens value. Adjust as necessary.
+        n=1,  # Number of completions to generate
     )
-    
+
     # Extracting the generated response content from the API response object
-    full_response = api_response['choices'][0]['message']['content']
+    full_response = api_response.choices[0].message.content.strip()
 
     # Yielding a response object containing the type and content of the generated message
     yield {"type": "response", "content": full_response}
 
 # Similar to generate_response but also includes indexed data to provide more context-aware and data-driven responses
+# TODO HERE    
 def generate_response_index(prompt, history, model_name, temperature, chat_engine):
     # Fetching the last message sent by the chatbot from the conversation history
     chatbot_message = history[-1]['content']
@@ -70,17 +70,17 @@ def generate_response_index(prompt, history, model_name, temperature, chat_engin
     full_prompt += f"\n### Relevant data from documents: {index_response}"
 
     # Making an API call to OpenAI to generate a chatbot response based on the constructed prompt
-    api_response = openai.ChatCompletion.create(
-        model=model_name,  # The specific OpenAI model to use for generating the response
-        temperature=temperature,  # The 'creativity' setting for the response
-        messages=[  # The list of message objects to provide conversation history context
-            {"role": "system", "content": full_prompt},  # System message to provide instruction
-            {"role": "user", "content": last_user_message}  # The last user message to generate a relevant reply
+    api_response = client.ChatCompletion.create(
+        model=model_name,
+        temperature=temperature,
+        messages=[
+            {"role": "system", "content": full_prompt},
+            {"role": "user", "content": last_user_message}
         ]
     )
     
     # Extracting the generated response content from the API response object
-    full_response = api_response['choices'][0]['message']['content']
+    full_response = api_response.choices[0].message.content
     
     # Yielding a response object containing the type and content of the generated message
     yield {"type": "response", "content": full_response}
@@ -102,15 +102,15 @@ def get_initial_message():
 
 # Function to generate the summary; used in part of the response
 def generate_summary(model_name, temperature, summary_prompt):
-    summary_response = openai.ChatCompletion.create(
+    summary_response = client.ChatCompletion.create(
         model=model_name,
         temperature=temperature,
         messages=[
             {"role": "system", "content": "You are an expert at summarizing information effectively and making others feel understood"},
-            {"role": "user", "content": summary_prompt},
+            {"role": "user", "content": summary_prompt}
         ]
     )
-    summary = summary_response['choices'][0]['message']['content']
+    summary = summary_response.choices[0].message.content
     print(f"summary: {summary}, model name: {model_name}, temperature: {temperature})")
     return summary
 
@@ -118,14 +118,14 @@ def generate_summary(model_name, temperature, summary_prompt):
 def transform_bullets(content):
     try:
         prompt = f"Summarize the following content in 3 brief bullet points while retaining the structure and conversational tone (using wording like 'you' and 'your idea'):\n{content}"
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            temperature=.2,
-            messages=[
-                {"role": "system", "content": prompt}
-            ],
-        )
-        return response['choices'][0]['message']['content'].strip()
+        response = client.ChatCompletion.create(
+        model="gpt-4",
+        temperature=.2,
+        messages=[
+            {"role": "system", "content": prompt}
+        ]
+    )
+        return response.choices[0].message.content.strip()
     except Exception as e:
         print(response)
         print("Error in transform_bullets:", e)

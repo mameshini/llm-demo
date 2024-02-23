@@ -1,8 +1,32 @@
 # Standard library imports
 import time
+import openai
+from openai import OpenAI
+from packaging import version
+
+import os
+import re
+from uuid import uuid4
+from typing import IO, Any, Dict, List, Tuple
+from copy import deepcopy
+import requests
+
+from unstructured.partition.pdf import partition_pdf
+from unstructured.documents.elements import Text
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.docstore.document import Document
+from sentence_transformers import SentenceTransformer
+from pinecone import Pinecone, ServerlessSpec
+import openai
+from pinecone.core.client.model.query_response import QueryResponse
+from pinecone_text.sparse import BM25Encoder
 
 # Third-Party Imports
 import streamlit as st
+
+# The following OS tools are required: 
+# brew install tesseract
+# brew install poppler
 
 # Importing other files for setup and functionalities
 from setup_st import *
@@ -11,6 +35,7 @@ from index_functions import *
 
 # Initialize session state variables if they don't exist
 initialize_session_state()
+indexLoaded = False
 
 # Setup Streamlit UI/UX elements
 set_design()
@@ -20,15 +45,35 @@ clear_button()
 download_button()
 
 # Setting up environment variables for OpenAI API key
-if 'api_key' in st.session_state and st.session_state['api_key']:
-    openai.api_key = st.session_state['api_key']
+required_version = version.parse("1.3.0")
+current_version = version.parse(openai.__version__)
+
+if current_version < required_version:
+    raise ValueError(f"Error: OpenAI version {openai.__version__}"
+                     " is less than the required version 1.1.1")
+else:
+    print("OpenAI version is compatible.")
+
+print(st.secrets["OPENAI_KEY"])
+openai_client = OpenAI(api_key=st.secrets["OPENAI_KEY"])
+pinecone_api_key = st.secrets["PINECONE_API_KEY"]
+pinecone_env = st.secrets["PINECONE_ENV"]
+bm25 = BM25Encoder()
 
 # Setting up indexing functionality
 try:
-    index = load_data()
-    chat_engine = index.as_chat_engine(chat_mode="condense_question", verbose=True)
+    if indexLoaded is False:
+        indexLoaded = True
+        filenames = load_data()  
+        index = partition_files(filenames, bm25)
+    else:
+        print("Index already created.")
 except Exception as e:
     st.sidebar.error(f"An error occurred while loading indexed data: {e}")
+    print(e.with_traceback())
+    st.error(f"An error occurred while loading indexed data: {e}")
+
+
 
 # Warning to show that index is not currently being used if checkbox is unchecked
 if not st.session_state['use_index']:
@@ -57,14 +102,16 @@ if prompt := st.chat_input("How would you like to reply?"):
             "You are an expert who is great at assisting users with whatever query they have",
             st.session_state.messages,
             st.session_state['model_name'],
+            openai_client,
+            bm25,
             st.session_state['temperature'],
-            chat_engine
         )
     else:
         response_generated = generate_response(
             "You are an expert who is great at assisting users with whatever query they have",
             st.session_state.messages,
             st.session_state['model_name'],
+            openai_client,
             st.session_state['temperature']
         )
     
