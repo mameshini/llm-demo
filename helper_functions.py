@@ -2,6 +2,13 @@
 import streamlit as st
 import langchain
 from index_functions import load_data
+from pinecone import Pinecone, ServerlessSpec
+from pinecone.core.client.model.query_response import QueryResponse
+from pinecone_text.sparse import BM25Encoder
+from index_functions import produce_embeddings
+from index_functions import issue_hybrid_query
+
+INDEX_NAME = "hybrid-search"
 
 # Main function to generate responses from OpenAI's API, not considering indexed data
 def generate_response(prompt, history, model_name, openai_client, temperature):
@@ -10,9 +17,6 @@ def generate_response(prompt, history, model_name, openai_client, temperature):
 
     # Fetching the first message that the user sent from the conversation history
     first_message = history[1]['content']
-
-    # Fetching the last message that the user sent from the conversation history
-    last_user_message = history[-1]['content']
 
     # Constructing a comprehensive prompt to feed to OpenAI for generating a response
     full_prompt = f"{prompt}\n\
@@ -40,43 +44,64 @@ def generate_response(prompt, history, model_name, openai_client, temperature):
     yield {"type": "response", "content": full_response}
 
 # Similar to generate_response but also includes indexed data to provide more context-aware and data-driven responses
-# TODO HERE    
-def generate_response_index(prompt, history, model_name, temperature, chat_engine):
+def generate_response_index(prompt, history, model_name, temperature):
+
+    # Retrive data from knowledge store in Pinecone
+    # Let's grab the textual metadata from our search results:
+    # Query Our Hybrid Docs
+    query = prompt
+    bm25 = st.session_state.session_state['bm25']
+    chat_engine = st.session_state.session_state['openai_client']
+    pinecone = st.session_state.session_state['pinecone']
+    index = pinecone.Index(INDEX_NAME)
+
+    query_sembedding = bm25.encode_queries(query)
+    query_dembedding = produce_embeddings([query])
+    # Note, for our dense embedding (`query_dembedding`), we need to grab the 1st value [0] since Pinecone expects a Numpy array when queried:
+    # when you get further down the results list, you'll see that we get an equation we can use to calculate KNN. That's a bit more useful than #3 in our pure keyword search, which is a bibliography entry. 
+    hybrid_3 = issue_hybrid_query(index, query_sembedding, query_dembedding[0], 0.3, 5)
+    hybrid_context = [i.get('metadata').get('text') for i in hybrid_3.get('matches')]
+    #pure_keyword_context = [i.get('metadata').get('text') for i in pure_keyword.get('matches')]
+    #pure_semantic_context = [i.get('metadata').get('text') for i in pure_semantic.get('matches')]
+
+    # We are then going to combine this "context" with our original query in a format that our LLM likes:
+
+    prompt = "What are nearest neighbors?"
+    hybrid_augmented_query = "\n\n---\n\n".join(hybrid_context)+"\n\n-----\n\n"+prompt
+    #pure_keyword_augmented_query = "\n\n---\n\n".join(pure_keyword_context)+"\n\n-----\n\n"+prompt
+    #pure_semantic_augmented_query = "\n\n---\n\n".join(pure_keyword_context)+"\n\n-----\n\n"+prompt
+    # Adding the indexed data to the prompt to make the chatbot response more context-aware and data-driven
+
+    # We are then going to give our LLM some instructions for how to act:
+    primer = f"""You are Q&A bot. A highly intelligent system that answers
+    user questions based on the information provided by the user above
+    each question. If the information can not be found in the information
+    provided by the user you truthfully say "I don't know".
+    """
+
     # Fetching the last message sent by the chatbot from the conversation history
     chatbot_message = history[-1]['content']
 
     # Fetching the first message that the user sent from the conversation history
     first_message = history[1]['content']
 
-    # Fetching the last message that the user sent from the conversation history
-    last_user_message = history[-1]['content']
-
     # Constructing a comprehensive prompt to feed to OpenAI for generating a response
-    full_prompt = f"{prompt}\n\
+    history_prompt = f"{prompt}\n\
     ### The original message: {first_message}. \n\
     ### Your latest message to me: {chatbot_message}. \n\
-    ### Previous conversation history for context: {history}"
-    
-    # Initializing a variable to store indexed data relevant to the user's last message
-    index_response = ""
+    ### Context:"
+    print(history_prompt)
 
-    # Fetching relevant indexed data based on the last user message using the chat engine
-    response = chat_engine.chat(last_user_message)
-    
-    # Storing the fetched indexed data in a variable
-    index_response = response.response
-
-    # Adding the indexed data to the prompt to make the chatbot response more context-aware and data-driven
-    full_prompt += f"\n### Relevant data from documents: {index_response}"
-
-    # Making an API call to OpenAI to generate a chatbot response based on the constructed prompt
-    api_response = client.ChatCompletion.create(
-        model=model_name,
-        temperature=temperature,
+    # TODO Making an API call to OpenAI to generate a chatbot response based on the constructed prompt
+    api_response = chat_engine.chat.completions.create(
+        model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": full_prompt},
-            {"role": "user", "content": last_user_message}
-        ]
+            {"role": "system", "content": primer},
+            {"role": "user", "content": hybrid_augmented_query}
+        ],
+        temperature=temperature,
+        max_tokens=350,  # Assuming a max_tokens value. Adjust as necessary.
+        n=1,  # Number of completions to generate
     )
     
     # Extracting the generated response content from the API response object

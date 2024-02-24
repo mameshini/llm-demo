@@ -35,8 +35,7 @@ from index_functions import *
 
 # Initialize session state variables if they don't exist
 initialize_session_state()
-indexLoaded = False
-
+    
 # Setup Streamlit UI/UX elements
 set_design()
 sidebar()
@@ -58,21 +57,26 @@ print(st.secrets["OPENAI_KEY"])
 openai_client = OpenAI(api_key=st.secrets["OPENAI_KEY"])
 pinecone_api_key = st.secrets["PINECONE_API_KEY"]
 pinecone_env = st.secrets["PINECONE_ENV"]
+
+# Initialize Pinecone
+pinecone = Pinecone(api_key=pinecone_api_key)
 bm25 = BM25Encoder()
+
+# Set session state
+if 'session_state' not in st.session_state:
+    st.session_state.session_state = {}
+    st.session_state.session_state['bm25'] = bm25
+    st.session_state.session_state['openai_client'] = openai_client
+    st.session_state.session_state['pinecone'] = pinecone
 
 # Setting up indexing functionality
 try:
-    if indexLoaded is False:
-        indexLoaded = True
         filenames = load_data()  
-        index = partition_files(filenames, bm25)
-    else:
-        print("Index already created.")
+        index = partition_files(filenames)
 except Exception as e:
     st.sidebar.error(f"An error occurred while loading indexed data: {e}")
     print(e.with_traceback())
     st.error(f"An error occurred while loading indexed data: {e}")
-
 
 
 # Warning to show that index is not currently being used if checkbox is unchecked
@@ -102,8 +106,6 @@ if prompt := st.chat_input("How would you like to reply?"):
             "You are an expert who is great at assisting users with whatever query they have",
             st.session_state.messages,
             st.session_state['model_name'],
-            openai_client,
-            bm25,
             st.session_state['temperature'],
         )
     else:

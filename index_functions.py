@@ -25,8 +25,10 @@ import langchain
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+INDEX_NAME = "hybrid-search"
+
 # Function to load in data found in the 'data' folder of the central repository; To upload your own data, simply remove the existing data in that folder and upload your own. Don't forget to update the prompt below!
-@st.cache_resource(show_spinner=True)
+@st.cache_data(show_spinner=True)
 def load_data():
     with st.spinner(text="Loading and indexing the data. This shouldn't take more than a minute.."):
         # Download our files to the /content/ dir 
@@ -57,6 +59,7 @@ def get_pdf(base_url: str, filename: str):
 # Partition all of our PDFs and store their partitions in a dictionary for easy retrieval & inspection later
 # Note: This takes a few mins to run (~12 mins; will be faster if running locally (~3 mins))
 
+@st.cache_resource
 def partition_files(filenames):
     # Read in our file paths
     freshdisk = os.path.join("./content/", filenames[0])
@@ -117,7 +120,7 @@ def partition_files(filenames):
     print(len(corpus))  # Awesome, we've got lots o' tokens here for our BM25 model to learn :))
     # Initialize BM25 and fit to our corpus
 
-    bm25 = BM25Encoder()
+    bm25 = st.session_state.session_state['bm25']
     bm25.fit(corpus)  
 
     # Create embeddings for each chunk
@@ -130,13 +133,8 @@ def partition_files(filenames):
     assert len(ivfpq_sembeddings) == len(chunked_files.get('ivfpq'))
 
     # Getting Our Embeddings into Pinecone
-    pinecone_api_key = st.secrets["PINECONE_API_KEY"]
-    pinecone_env = st.secrets["PINECONE_ENV"]
-    # Initialize Pinecone
-    pinecone = Pinecone(api_key=pinecone_api_key)
-    active_indexes = pinecone.list_indexes()
-    # choose a name for our index
-    INDEX_NAME = "hybrid-search"
+    pinecone = st.session_state.session_state['pinecone']
+    
     # create Pinecone index
     if INDEX_NAME not in [index.name for index in pinecone.list_indexes()]:
         # pinecone.delete_index(INDEX_NAME)
@@ -164,22 +162,9 @@ def partition_files(filenames):
         index.upsert(ivfpq_com_objs)
         print(index.describe_index_stats())
         
-        # Query Our Hybrid Docs
-        query = "What are nearest neighbors?"
-        query_sembedding = bm25.encode_queries(query)
-        query_dembedding = produce_embeddings([query])
-        # Note, for our dense embedding (`query_dembedding`), we need to grab the 1st value [0] since Pinecone expects a Numpy array when queried:
-        issue_hybrid_query(index, query_sembedding, query_dembedding[0], 0.0, 5)
-        issue_hybrid_query(index, query_sembedding, query_dembedding[0], 1.0, 5)
-        issue_hybrid_query(index, query_sembedding, query_dembedding[0], 0.2, 5)  # closer to 1.0 = closer to pure keyword search
-        # hen you get further down the results list, you'll see that we get an equation we can use to calculate KNN. That's a bit more useful than #3 in our pure keyword search, which is a bibliography entry. 
-
         return index
 
 
-
-
-    
 
 
 
