@@ -71,8 +71,8 @@ if 'session_state' not in st.session_state:
 
 # Setting up indexing functionality
 try:
-        filenames = load_data()  
-        index = partition_files(filenames)
+    filenames = load_data()  
+    index = partition_files(filenames)
 except Exception as e:
     st.sidebar.error(f"An error occurred while loading indexed data: {e}")
     print(e.with_traceback())

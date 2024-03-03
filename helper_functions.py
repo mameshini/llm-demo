@@ -49,27 +49,28 @@ def generate_response_index(prompt, history, model_name, temperature):
     # Retrive data from knowledge store in Pinecone
     # Let's grab the textual metadata from our search results:
     # Query Our Hybrid Docs
-    query = prompt
+    # Fetching the last message from the user 
+    chatbot_message = history[-1]['content']
+
     bm25 = st.session_state.session_state['bm25']
     chat_engine = st.session_state.session_state['openai_client']
     pinecone = st.session_state.session_state['pinecone']
     index = pinecone.Index(INDEX_NAME)
 
-    query_sembedding = bm25.encode_queries(query)
-    query_dembedding = produce_embeddings([query])
+    query_sembedding = bm25.encode_queries(chatbot_message)
+    query_dembedding = produce_embeddings([chatbot_message])
     # Note, for our dense embedding (`query_dembedding`), we need to grab the 1st value [0] since Pinecone expects a Numpy array when queried:
     # when you get further down the results list, you'll see that we get an equation we can use to calculate KNN. That's a bit more useful than #3 in our pure keyword search, which is a bibliography entry. 
-    hybrid_3 = issue_hybrid_query(index, query_sembedding, query_dembedding[0], 0.3, 5)
+    hybrid_3 = issue_hybrid_query(index, query_sembedding, query_dembedding[0], 0.1, 7)
     hybrid_context = [i.get('metadata').get('text') for i in hybrid_3.get('matches')]
     #pure_keyword_context = [i.get('metadata').get('text') for i in pure_keyword.get('matches')]
     #pure_semantic_context = [i.get('metadata').get('text') for i in pure_semantic.get('matches')]
 
     # We are then going to combine this "context" with our original query in a format that our LLM likes:
 
-    prompt = "What are nearest neighbors?"
-    hybrid_augmented_query = "\n\n---\n\n".join(hybrid_context)+"\n\n-----\n\n"+prompt
-    #pure_keyword_augmented_query = "\n\n---\n\n".join(pure_keyword_context)+"\n\n-----\n\n"+prompt
-    #pure_semantic_augmented_query = "\n\n---\n\n".join(pure_keyword_context)+"\n\n-----\n\n"+prompt
+    hybrid_augmented_query = "\n\n---\n\n".join(hybrid_context)+"\n\n-----\n\n"+chatbot_message
+    #pure_keyword_augmented_query = "\n\n---\n\n".join(pure_keyword_context)+"\n\n-----\n\n"+chatbot_message
+    #pure_semantic_augmented_query = "\n\n---\n\n".join(pure_keyword_context)+"\n\n-----\n\n"+chatbot_message
     # Adding the indexed data to the prompt to make the chatbot response more context-aware and data-driven
 
     # We are then going to give our LLM some instructions for how to act:
@@ -79,18 +80,7 @@ def generate_response_index(prompt, history, model_name, temperature):
     provided by the user you truthfully say "I don't know".
     """
 
-    # Fetching the last message sent by the chatbot from the conversation history
-    chatbot_message = history[-1]['content']
-
-    # Fetching the first message that the user sent from the conversation history
-    first_message = history[1]['content']
-
-    # Constructing a comprehensive prompt to feed to OpenAI for generating a response
-    history_prompt = f"{prompt}\n\
-    ### The original message: {first_message}. \n\
-    ### Your latest message to me: {chatbot_message}. \n\
-    ### Context:"
-    print(history_prompt)
+    print(hybrid_augmented_query)
 
     # TODO Making an API call to OpenAI to generate a chatbot response based on the constructed prompt
     api_response = chat_engine.chat.completions.create(
